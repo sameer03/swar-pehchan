@@ -6,7 +6,9 @@ It runs entirely in the browser. There's no server and no install, and your audi
 
 ## Features
 
-- **Live transcription:** a note is written down once you've held it steadily (the hold time is adjustable). A pause starts a new phrase `|`.
+- **Live transcription:** the notes you sing appear as you sing them, and a pause starts a new phrase `|`.
+- **Ornaments, not just main notes:** quick touches are written as small **kan swaras**, slides as **meend** arcs, andolan stays one oscillating note, and fast murki / gamak turns are caught note by note.
+- **Detail setting:** *Main notes only*, *Notes + kan swar & meend* (default), or *Every movement*.
 - **All 12 swaras:** Sa, komal Re, Re, komal Ga, Ga, Ma, tivra Ma, Pa, komal Dha, Dha, komal Ni, Ni.
 - **Octave marks:** a dot below means mandra (lower octave) and a dot above means taar (upper octave).
 - **Your own Sa:** pick it from a list (C … B), or press **Sing your Sa** and hold your note for 2 seconds.
@@ -39,7 +41,7 @@ python3 -m http.server 8000
 | Capture | Web Audio API reads 2048-sample frames from the mic (or the decoded file). |
 | Pitch | The **YIN** algorithm finds the fundamental frequency of each frame (65–1100 Hz). |
 | Swar | `semitones = 12 · log2(f / Sa)`, rounded to the nearest of the 12 swaras. The remainder is shown in cents. |
-| Notes | A segmenter commits a swar only after it's held for the hold time, and it ignores glides between notes. |
+| Notes | A median filter removes octave blips. The voice has to move more than about half a semitone to count as a new swar, so vibrato and andolan don't split a note. Swaras touched for 25–45 ms or more are written. Those held past the *main-note hold* are main notes, and shorter ones become kan swaras. A slide lasting 60 ms or more between two written swaras is marked as meend. |
 
 The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The UI is in `app.js`.
 
@@ -51,12 +53,14 @@ The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The
 | Ma with a tick above | tivra | `Ma(t)` |
 | dot below | mandra saptak | `.Ni` |
 | dot above | taar saptak | `Sa'` |
+| small raised swar | kan swar (grace note) | `[Ga]Re` |
+| arc between swaras | meend (slide) | `Pa~Ga` |
 
 ## Tips and limitations
 
 - **Set Sa first.** Every swar is relative to it. For a film song like *Lag Ja Gale*, find the key the song is in (or sing along and use **Sing your Sa**).
 - It works best with **one voice or one instrument**. Recordings with an orchestra, tabla or harmonium behind the voice will produce noisy results. For those, separate the vocals first with a tool such as [Demucs](https://github.com/facebookresearch/demucs) and upload the vocal track.
-- Fast taans and heavy gamak may be shortened or skipped. Lower the hold time to catch faster notes, or raise it to reduce noise.
+- To catch fast taans, murki and gamak, choose **Every movement**. If you're seeing too many small notes, switch to **Main notes only** or raise the main-note hold.
 - Equal temperament is used. Shruti-level (22-note) detail is not modelled.
 
 ## Tests
@@ -65,7 +69,7 @@ The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The
 node test/core.test.js
 ```
 
-This synthesises a scale and checks that it is transcribed correctly.
+This synthesises sung phrases (vibrato, kan swar, meend, andolan, murki, a breathy voice) and checks each one is transcribed correctly.
 
 ## Roadmap ideas
 

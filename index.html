@@ -42,8 +42,16 @@
         </div>
       </div>
       <div class="field">
-        <label for="minDur">Hold time <span id="minDurVal" class="muted mono">120 ms</span></label>
-        <input id="minDur" type="range" min="50" max="350" step="10" value="120">
+        <label for="detail">Detail</label>
+        <select id="detail">
+          <option value="main">Main notes only</option>
+          <option value="kan" selected>Notes + kan swar &amp; meend</option>
+          <option value="every">Every movement (murki, gamak)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="minDur">Main-note hold <span id="minDurVal" class="muted mono">120 ms</span></label>
+        <input id="minDur" type="range" min="60" max="400" step="10" value="120">
       </div>
     </section>
 
@@ -86,8 +94,10 @@
         <li><span class="sw" data-top="|">Ma</span> tick above = tivra (sharp) Ma</li>
         <li><span class="sw" data-bot="•">Ni</span> dot below = mandra (lower octave)</li>
         <li><span class="sw" data-top="•">Sa</span> dot above = taar (upper octave)</li>
+        <li><span class="sw kan">Ga</span><span class="sw">Re</span> small raised = kan swar (grace note)</li>
+        <li><span class="sw">Pa</span><span class="meend">⁀</span><span class="sw">Ga</span> arc = meend (slide)</li>
       </ul>
-      <p class="muted">Copied text uses <code>Re(k)</code> for komal, <code>Ma(t)</code> for tivra, <code>.Ni</code> for mandra and <code>Sa'</code> for taar.</p>
+      <p class="muted">Copied text uses <code>Re(k)</code> for komal, <code>Ma(t)</code> for tivra, <code>.Ni</code> for mandra and <code>Sa'</code> for taar, <code>[Ga]Re</code> for a kan swar and <code>Pa~Ga</code> for meend.</p>
     </footer>
   </main>
 

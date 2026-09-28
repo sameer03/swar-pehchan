@@ -1,33 +1,84 @@
-// Synthesises a sung scale and checks Swar Pehchaan transcribes it. Run: node test/core.test.js
+// Synthesises sung phrases and checks Swar Pehchaan transcribes them. Run: node test/core.test.js
 const assert = require('assert');
 const C = require('../swar-core.js');
 
-const sr = 44100, sa = C.noteFreq('C#', 3);
-function tone(semi, secs, out) {
-  const f = sa * Math.pow(2, semi / 12);
-  for (let i = 0; i < sr * secs; i++) {
-    const t = i / sr;
-    out.push(0.5 * Math.sin(2 * Math.PI * f * t) + 0.25 * Math.sin(4 * Math.PI * f * t) + 0.1 * Math.sin(6 * Math.PI * f * t));
+const FRAME = +(process.env.FRAME || 512);
+const SR = 44100, SA = C.noteFreq('C#', 3);
+
+/** Render a pitch contour: list of [semitoneStart, semitoneEnd, seconds, {vibrato, andolan}] (null = silence). */
+function sing(parts, noise = 0) {
+  const out = [];
+  let phase = 0, seed = 1;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5);
+  for (const p of parts) {
+    if (p === null || p[0] === null) { const n = SR * (p ? p[2] : 0.6); for (let i = 0; i < n; i++) out.push(noise * rnd() * 0.3); continue; }
+    const [a, b, secs, o = {}] = p, n = Math.round(SR * secs);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR, k = i / n;
+      let semi = a + (b - a) * k;
+      if (o.vibrato) semi += o.vibrato * Math.sin(2 * Math.PI * 5.5 * t);
+      if (o.andolan) semi += o.andolan * Math.sin(2 * Math.PI * 1.5 * t);
+      phase += 2 * Math.PI * SA * Math.pow(2, semi / 12) / SR;
+      out.push(0.5 * Math.sin(phase) + 0.25 * Math.sin(2 * phase) + 0.12 * Math.sin(3 * phase) + noise * rnd());
+    }
   }
-}
-function silence(secs, out) { for (let i = 0; i < sr * secs; i++) out.push(0); }
-
-const sig = [];
-[0, 2, 3, 5, 6, 7, 8, 11, 12, -1, -5].forEach((s) => tone(s, 0.4, sig));
-silence(0.8, sig);
-tone(0, 0.4, sig);
-silence(0.8, sig);
-
-const q = 4, data = C.decimate(Float32Array.from(sig), q), rate = sr / q;
-const out = [];
-const seg = new C.Segmenter((e) => out.push(e.type === 'gap' ? '|' : C.swarText(e.swar)));
-for (let i = 0; i + 1024 < data.length; i += 128) {
-  const fr = data.subarray(i, i + 1024), t = i / rate;
-  if (C.rms(fr) < 0.01) { seg.push(t, null); continue; }
-  const p = C.detectPitch(fr, rate);
-  seg.push(t, p ? C.semitonesFromSa(p.freq, sa) : null);
+  return Float32Array.from(out);
 }
 
-assert.strictEqual(out.join(' '), "Sa Re Ga(k) Ma Ma(t) Pa Dha(k) Ni Sa' .Ni .Pa | Sa |");
+function transcribe(sig, detail = 'kan') {
+  const q = 4, data = C.decimate(sig, q), rate = SR / q;
+  const items = [], byId = {};
+  const seg = new C.Segmenter((e) => {
+    if (e.type === 'gap') items.push({ kind: 'gap' });
+    else if (e.type === 'note') { byId[e.id] = { kind: 'pending', swar: e.swar, meend: e.meend }; items.push(byId[e.id]); }
+    else if (e.type === 'main') byId[e.id].kind = 'main';
+    else if (e.type === 'end') byId[e.id].kind = e.kind;
+  });
+  seg.setDetail(detail);
+  let t = 0;
+  for (let i = 0; i + FRAME < data.length; i += 128) {
+    const fr = data.subarray(i, i + FRAME); t = i / rate;
+    if (C.rms(fr) < 0.02) { seg.push(t, null); continue; }
+    const p = C.detectPitch(fr, rate);
+    seg.push(t, p ? C.semitonesFromSa(p.freq, SA) : undefined);
+  }
+  seg.flush(t);
+  return C.notationText(items);
+}
+
+function check(name, got, want) {
+  console.log(`${got === want ? 'ok  ' : 'FAIL'} ${name}\n     got:  ${got.replace(/\n/g, ' ')}${got === want ? '' : '\n     want: ' + want.replace(/\n/g, ' ')}`);
+  assert.strictEqual(got, want);
+}
+
+// 1. Plain scale with vibrato, all octaves and altered swaras
+const scale = [0, 2, 3, 5, 6, 7, 8, 11, 12, -1, -5].map((s) => [s, s, 0.4, { vibrato: 0.25 }]);
+check('scale with vibrato', transcribe(sing([...scale, null, [0, 0, 0.4], null])),
+  "Sa Re Ga(k) Ma Ma(t) Pa Dha(k) Ni Sa' .Ni .Pa |\nSa");
+
+// 2. Kan swar: a quick touch of Ga before landing on Re
+check('kan swar', transcribe(sing([[0, 0, 0.4], [4, 4, 0.07], [2, 2, 0.45], null])),
+  'Sa [Ga]Re');
+
+// 3. Meend: slide from Pa down to Ga
+check('meend', transcribe(sing([[7, 7, 0.4], [7, 4, 0.09], [4, 4, 0.45], null])),
+  'Pa~Ga');
+
+// 4. Andolan on komal Ga stays one note, not a flicker of Ga/Re/Ma
+check('andolan', transcribe(sing([[2, 2, 0.35], [3, 3, 1.2, { andolan: 0.3 }], [2, 2, 0.35], null])),
+  'Re Ga(k) Re');
+
+// 5. Murki: fast Pa-Dha-Pa-Ma turn into Ga, captured in "every" mode
+check('murki (every movement)', transcribe(sing([[4, 4, 0.35], [7, 7, 0.06], [9, 9, 0.06], [7, 7, 0.06], [5, 5, 0.06], [4, 4, 0.4], null]), 'every'),
+  'Ga [Pa][Dha][Pa][Ma]Ga');
+
+// 6. Same murki in "main notes" mode shows only the held notes, joined by ~ (an ornament happened here)
+check('murki (main notes only)', transcribe(sing([[4, 4, 0.35], [7, 7, 0.06], [9, 9, 0.06], [7, 7, 0.06], [5, 5, 0.06], [2, 2, 0.4], null]), 'main'),
+  'Ga~Re');
+
+// 7. Breathy voice with noise still transcribes
+check('breathy voice', transcribe(sing([[0, 0, 0.35, { vibrato: 0.2 }], [2, 2, 0.35, { vibrato: 0.2 }], [4, 4, 0.35, { vibrato: 0.2 }], null], 0.12)),
+  'Sa Re Ga');
+
 assert.strictEqual(C.westernName(C.noteFreq('A', 4)), 'A4');
-console.log('ok:', out.join(' '));
+console.log('all tests passed');

@@ -8,7 +8,7 @@
     micBtn: $('micBtn'), micLabel: $('micLabel'),
     saNote: $('saNote'), saOct: $('saOct'), saHz: $('saHz'),
     setSaBtn: $('setSaBtn'), droneBtn: $('droneBtn'),
-    minDur: $('minDur'), minDurVal: $('minDurVal'),
+    minDur: $('minDur'), minDurVal: $('minDurVal'), detail: $('detail'),
     nowSwar: $('nowSwar'), nowDetail: $('nowDetail'), needle: $('meterNeedle'),
     trace: $('trace'), transcript: $('transcript'),
     copyBtn: $('copyBtn'), clearBtn: $('clearBtn'),
@@ -41,14 +41,19 @@
   updateSa();
 
   /* ---------- Segmenter & transcript ---------- */
-  const notes = []; // {type:'note', swar} | {type:'gap'}
+  const items = []; // {kind:'pending'|'main'|'kan'|'gap', swar, meend, el}
+  const byId = new Map();
   let hasContent = false;
 
-  const segmenter = new C.Segmenter(onEvent, { minDuration: 0.12 });
-  els.minDur.addEventListener('input', () => {
-    segmenter.minDuration = +els.minDur.value / 1000;
+  const segmenter = new C.Segmenter(onEvent);
+  function applySettings() {
+    segmenter.holdTime = +els.minDur.value / 1000;
+    segmenter.setDetail(els.detail.value);
     els.minDurVal.textContent = els.minDur.value + ' ms';
-  });
+  }
+  els.minDur.addEventListener('input', applySettings);
+  els.detail.addEventListener('change', applySettings);
+  applySettings();
 
   function markAttrs(el, s) {
     el.classList.toggle('komal', !!s.komal);
@@ -59,36 +64,59 @@
     el.setAttribute('data-bot', s.octave < 0 ? '•'.repeat(-s.octave) : '');
   }
 
-  function onEvent(e) {
-    if (e.type === 'gap' && (!notes.length || notes[notes.length - 1].type === 'gap')) return;
-    notes.push(e);
+  function append(node) {
     if (!hasContent) { els.transcript.innerHTML = ''; hasContent = true; }
+    els.transcript.appendChild(node);
+  }
+
+  function onEvent(e) {
     if (e.type === 'gap') {
+      if (!items.length || items[items.length - 1].kind === 'gap') return;
+      items.push({ kind: 'gap' });
       const b = document.createElement('span');
       b.className = 'bar'; b.textContent = '|';
-      els.transcript.appendChild(b);
-    } else {
+      append(b);
+      return;
+    }
+    if (e.type === 'note') {
       const prev = els.transcript.querySelector('.fresh');
       if (prev) prev.classList.remove('fresh');
+      if (e.meend && items.length && items[items.length - 1].kind !== 'gap') {
+        const m = document.createElement('span');
+        m.className = 'meend'; m.textContent = '⁀'; m.title = 'meend (slide)';
+        append(m);
+      }
       const sp = document.createElement('span');
-      sp.className = 'sw fresh';
+      sp.className = 'sw fresh pending';
       sp.textContent = e.swar.name;
       sp.title = C.swarText(e.swar);
       markAttrs(sp, e.swar);
-      els.transcript.appendChild(sp);
-      els.transcript.appendChild(document.createTextNode(' '));
+      append(sp);
+      const it = { kind: 'pending', swar: e.swar, meend: e.meend, el: sp };
+      items.push(it); byId.set(e.id, it);
+      return;
+    }
+    const it = byId.get(e.id);
+    if (!it) return;
+    if (e.type === 'main' || (e.type === 'end' && e.kind === 'main')) {
+      it.kind = 'main';
+      it.el.classList.remove('pending', 'kan');
+    } else if (e.type === 'end') {
+      it.kind = 'kan';
+      it.el.classList.remove('pending');
+      it.el.classList.add('kan');
+      it.el.title = 'kan swar: ' + C.swarText(it.swar);
     }
   }
 
   function clearTranscript() {
-    notes.length = 0; hasContent = false; segmenter.reset();
+    items.length = 0; byId.clear(); hasContent = false; segmenter.reset();
     els.transcript.innerHTML = '<span class="muted">Notes you sing appear here. A pause starts a new phrase.</span>';
   }
   els.clearBtn.addEventListener('click', clearTranscript);
 
   function transcriptText() {
-    return notes.map((n) => (n.type === 'gap' ? '|' : C.swarText(n.swar)))
-      .join(' ').replace(/\s*\|\s*$/, '').replace(/ \| /g, ' |\n');
+    return C.notationText(items.map((i) => (i.kind === 'pending' ? Object.assign({}, i, { kind: 'main' }) : i)));
   }
   els.copyBtn.addEventListener('click', async () => {
     const txt = transcriptText();
@@ -145,8 +173,8 @@
     rafId = requestAnimationFrame(loop);
     analyser.getFloatTimeDomainData(buf);
     const t = ctx.currentTime;
-    let freq = null;
-    if (C.rms(buf) > SILENCE_RMS) {
+    let freq = null, loud = C.rms(buf) > SILENCE_RMS;
+    if (loud) {
       const p = C.detectPitch(buf, ctx.sampleRate);
       if (p) freq = p.freq;
     }
@@ -160,7 +188,7 @@
     }
 
     const semi = freq ? C.semitonesFromSa(freq, saFreq) : null;
-    segmenter.push(t, semi);
+    segmenter.push(t, freq ? semi : loud ? undefined : null);
     history.push({ t, semi });
     while (history.length && t - history[0].t > TRACE_SECONDS) history.shift();
     showNow(freq, semi);
@@ -308,7 +336,7 @@
     // Downsample to ~11 kHz: plenty for voice, and ~16x faster pitch tracking
     const q = Math.max(1, Math.floor(audio.sampleRate / 11025));
     const data = C.decimate(mono, q), sr = audio.sampleRate / q;
-    const FRAME = 1024, HOP = 128;
+    const FRAME = 512, HOP = 128; // ~46 ms window, ~12 ms hop: fine enough for kan swaras
 
     // Loudness gate relative to the recording's own level
     let peak = 0;
@@ -327,15 +355,15 @@
           const t = i / sr;
           if (C.rms(fr) < gate) { segmenter.push(t, null); continue; }
           const p = C.detectPitch(fr, sr);
-          segmenter.push(t, p ? C.semitonesFromSa(p.freq, saFreq) : null);
+          segmenter.push(t, p ? C.semitonesFromSa(p.freq, saFreq) : undefined);
         }
         els.fileStatus.textContent = `Analysing ${name}… ${Math.round((i / total) * 100)}%`;
         if (i < total - FRAME) setTimeout(chunk, 0); else resolve();
       }
       chunk();
     });
-    segmenter.push(total / sr + 1, null);
-    const count = notes.filter((x) => x.type === 'note').length;
-    els.fileStatus.textContent = `${name}: ${count} notes found.`;
+    segmenter.flush(total / sr);
+    const main = items.filter((x) => x.kind === 'main').length, kan = items.filter((x) => x.kind === 'kan').length;
+    els.fileStatus.textContent = `${name}: ${main} notes` + (kan ? ` + ${kan} kan swaras` : '') + ' found.';
   }
 })();

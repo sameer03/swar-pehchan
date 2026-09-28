@@ -39,7 +39,7 @@
    * Returns { freq, clarity } or null when no clear pitch is found.
    */
   function detectPitch(buf, sampleRate, opts) {
-    const o = Object.assign({ minFreq: 65, maxFreq: 1100, threshold: 0.15 }, opts || {});
+    const o = Object.assign({ minFreq: 65, maxFreq: 1100, threshold: 0.2 }, opts || {});
     const W = buf.length >> 1;
     const tauMin = Math.max(2, Math.floor(sampleRate / o.maxFreq));
     const tauMax = Math.min(W - 1, Math.floor(sampleRate / o.minFreq));
@@ -69,7 +69,14 @@
         break;
       }
     }
-    if (tau < 0) return null;
+    if (tau < 0) {
+      // Real voices are breathier than test tones: fall back to the best dip if it's reasonably clear.
+      let best = tauMin;
+      for (let t = tauMin + 1; t <= tauMax; t++) if (d[t] < d[best]) best = t;
+      if (d[best] > (o.fallback || 0.35)) return null;
+      tau = best;
+    }
+    if (tau < 1 || tau > tauMax) return null;
 
     // Parabolic interpolation for sub-sample accuracy
     const x0 = d[tau - 1], x1 = d[tau], x2 = d[tau + 1];
@@ -110,50 +117,135 @@
   }
 
   /**
-   * Turns a stream of per-frame pitches into discrete notes.
-   * A note is committed once it has been held steadily for minDuration seconds.
-   * Frames far from any semitone (glides / meend) don't reset the current note.
+   * How much of the singing to capture.
+   *  holdTime  – a swar held this long is a main note
+   *  kanTime   – anything touched at least this long is written (shorter = kan swar)
+   *  hysteresis– how far (semitones) the voice must move before we call it a new swar
+   *  smooth    – median filter length in frames (kills octave blips)
+   */
+  const DETAIL = {
+    main:  { kanTime: null, hysteresis: 0.7,  smooth: 5 },  // kanTime null = same as holdTime
+    kan:   { kanTime: 0.045, hysteresis: 0.6, smooth: 5 },
+    every: { kanTime: 0.025, hysteresis: 0.52, smooth: 3 },
+  };
+
+  function median(xs) {
+    const s = xs.slice().sort((a, b) => a - b);
+    return s[s.length >> 1];
+  }
+
+  /**
+   * Turns a stream of per-frame pitches into notes, keeping ornaments.
+   *
+   * push(time, x):  x = semitones above Sa (float) · null = silence · undefined = loud but no clear pitch
+   *
+   * Events:
+   *  {type:'note', id, swar, meend}  a swar has been touched long enough to write down
+   *  {type:'main', id}               …and has now been held long enough to be a main note
+   *  {type:'end',  id, kind, duration} the swar finished; kind is 'main' or 'kan'
+   *  {type:'gap'}                    a pause (new phrase)
+   * meend = true when the voice slid into this swar through notes too brief to write.
    */
   class Segmenter {
     constructor(onEvent, opts) {
       this.onEvent = onEvent;
-      this.minDuration = (opts && opts.minDuration) || 0.12;
-      this.gapTime = (opts && opts.gapTime) || 0.45;
-      this.tolerance = (opts && opts.tolerance) || 0.35; // semitones
+      this.holdTime = 0.12;
+      this.gapTime = 0.35;
+      this.breakTime = 0.08; // silence shorter than this doesn't end a note (consonants, breaths)
+      this.meendTime = 0.06; // a glide taking at least this long is written as meend (plain jumps settle faster)
+      this.setDetail('kan');
+      Object.assign(this, opts || {});
       this.reset();
     }
+    setDetail(level) {
+      const p = DETAIL[level] || DETAIL.kan;
+      this.detail = level;
+      this._kanTime = p.kanTime;
+      this.hysteresis = p.hysteresis;
+      this.smooth = p.smooth;
+    }
+    get kanTime() { return this._kanTime == null ? this.holdTime : Math.min(this._kanTime, this.holdTime); }
     reset() {
-      this.cand = null;
-      this.candStart = 0;
-      this.last = null;
+      this.cur = null;
+      this.recent = [];
       this.lastVoiced = -Infinity;
       this.gapEmitted = true;
+      this.passing = false;
+      this.prev = null; // last written segment {semi, id, main}
+      this.nextId = 1;
     }
-    /** semiFloat: semitones above Sa (float), or null for silence/unvoiced. */
-    push(time, semiFloat) {
-      if (semiFloat === null) {
-        this.cand = null;
+    push(time, x) {
+      if (x === undefined) return; // unclear frame: keep whatever we have
+      if (x === null) {
+        this.recent.length = 0;
+        if (this.cur && time - this.lastVoiced > this.breakTime) {
+          this._end();
+          this.passing = false;
+          this.prev = null;
+        }
         if (!this.gapEmitted && time - this.lastVoiced > this.gapTime) {
           this.gapEmitted = true;
-          this.last = null;
           this.onEvent({ type: 'gap', time });
         }
         return;
       }
+      this.recent.push(x);
+      if (this.recent.length > this.smooth) this.recent.shift();
+      const s = median(this.recent);
       this.lastVoiced = time;
-      const r = Math.round(semiFloat);
-      if (Math.abs(semiFloat - r) > this.tolerance) return; // in a glide
-      if (this.cand !== r) {
-        this.cand = r;
-        this.candStart = time;
-        return;
+
+      if (this.cur && Math.abs(s - this.cur.semi) < this.hysteresis) {
+        this.cur.last = time;
+      } else {
+        if (this.cur) this._end();
+        this.cur = { semi: Math.round(s), start: time, last: time, written: false, main: false };
       }
-      if (time - this.candStart >= this.minDuration && this.last !== r) {
-        this.last = r;
+      this._check(time);
+    }
+    _check(time) {
+      const c = this.cur;
+      if (!c.written && time - c.start >= this.kanTime) {
+        c.written = true;
+        if (this.prev && this.prev.semi === c.semi && this.passing) {
+          // Wobbled away and straight back: same note continuing, not a new one.
+          c.id = this.prev.id; c.main = this.prev.main;
+        } else {
+          c.id = this.nextId++;
+          this.onEvent({ type: 'note', id: c.id, time: c.start, swar: swarFor(c.semi), meend: this.passing && !!this.prev && c.start - this.prev.last >= this.meendTime });
+        }
+        this.passing = false;
         this.gapEmitted = false;
-        this.onEvent({ type: 'note', time: this.candStart, swar: swarFor(r) });
+      }
+      if (c.written && !c.main && time - c.start >= this.holdTime) {
+        c.main = true;
+        this.onEvent({ type: 'main', id: c.id });
       }
     }
+    _end() {
+      const c = this.cur;
+      this.cur = null;
+      if (!c.written) { this.passing = true; return; } // slid through it
+      this.prev = { semi: c.semi, id: c.id, main: c.main, last: c.last };
+      this.onEvent({ type: 'end', id: c.id, kind: c.main ? 'main' : 'kan', duration: c.last - c.start });
+    }
+    /** Call at end of a recording to close the last note. */
+    flush(time) { this.push(time, null); this.push(time + this.gapTime + 1, null); }
+  }
+
+  /** Plain-text notation from a list of {kind:'main'|'kan'|'gap', swar, meend}. */
+  function notationText(items) {
+    const out = [];
+    let pendingKan = '';
+    for (const it of items) {
+      if (it.kind === 'gap') { if (out.length) out.push('|\n'); pendingKan = ''; continue; }
+      const t = swarText(it.swar);
+      const link = it.meend && out.length && !out[out.length - 1].endsWith('\n') ? '~' : '';
+      if (it.kind === 'kan') { pendingKan += (link ? '~' : '') + '[' + t + ']'; continue; }
+      out.push((link && !pendingKan ? '~' : '') + pendingKan + t);
+      pendingKan = '';
+    }
+    if (pendingKan) out.push(pendingKan);
+    return out.join(' ').replace(/ ~/g, '~').replace(/\|\n /g, '|\n').replace(/\s*\|\n$/, '').trim();
   }
 
   /** Average-and-decimate a signal (cheap low-pass + downsample). */
@@ -171,7 +263,7 @@
 
   const api = {
     SWARAS, WESTERN, noteFreq, westernName, detectPitch, rms,
-    semitonesFromSa, swarFor, swarText, Segmenter, decimate,
+    semitonesFromSa, swarFor, swarText, Segmenter, DETAIL, notationText, decimate,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SwarCore = api;

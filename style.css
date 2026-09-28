@@ -54,8 +54,9 @@ code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; fon
 select, input[type=range] { font: inherit; }
 select {
   background: var(--bg); color: var(--ink); border: 1px solid var(--line);
-  border-radius: 8px; padding: 6px 8px;
+  border-radius: 8px; padding: 6px 8px; max-width: 100%;
 }
+#detail { width: 100%; }
 input[type=range] { width: 100%; accent-color: var(--accent); }
 
 .btn {
@@ -104,6 +105,11 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .swar-big::before { top: 0; } .swar-big::after { bottom: 0; }
 .komal { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
 .sw.fresh { color: var(--accent); }
+.sw.pending { opacity: .75; }
+.sw.kan { font-size: .6em; vertical-align: .9em; padding: 0 1px; color: var(--muted); font-weight: 600; }
+.sw.kan.komal { text-underline-offset: 2px; text-decoration-thickness: 1.5px; }
+.meend { color: var(--accent); font-size: 1.3em; margin: 0 -2px; vertical-align: .15em; }
+.controls { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 
 .transcript { font-size: 20px; line-height: 2.1; min-height: 60px; word-spacing: 2px; }
 .transcript .bar { color: var(--muted); padding: 0 8px; }
