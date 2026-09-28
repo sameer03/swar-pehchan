@@ -43,7 +43,7 @@ python3 -m http.server 8000
 | Swar | `semitones = 12 · log2(f / Sa)`, rounded to the nearest of the 12 swaras. The remainder is shown in cents. |
 | Notes | A median filter removes octave blips. The voice has to move more than about half a semitone to count as a new swar, so vibrato and andolan don't split a note. Swaras touched for 25–45 ms or more are written. Those held past the *main-note hold* are main notes, and shorter ones become kan swaras. A slide lasting 60 ms or more between two written swaras is marked as meend. |
 
-The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The tanpura is in [`tanpura.js`](tanpura.js): each string is built from up to 48 harmonics whose upper overtones swell shortly after the pluck, the way a jawari bridge makes them. The UI is in `app.js`.
+The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The tanpura is in [`tanpura.js`](tanpura.js). Each string is a physical model (extended Karplus–Strong) with two slightly detuned polarisations and a lossless jawari bridge that keeps feeding the upper harmonics. A nasal resonance sweeps upward after each pluck, and the sound gets stereo placement and room reverb. The UI is in `app.js`.
 
 ### Notation used
 
