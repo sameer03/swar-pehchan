@@ -13,7 +13,11 @@ It runs entirely in the browser. There's no server and no install, and your audi
 - **Octave marks:** a dot below means mandra (lower octave) and a dot above means taar (upper octave).
 - **Your own Sa:** pick it from a list (C … B), or press **Sing your Sa** and hold your note for 2 seconds.
 - **Tuning meter and pitch trace:** see how many cents sharp or flat you are, and see your meend and andolan against the swar lines.
-- **Tanpura:** a synthesised four-string tanpura (first string, Sa, Sa, kharaj Sa) with jawari buzz, automatically tuned to your Sa. You can set the first string to Pa, Ma or Ni and adjust speed and volume. Use headphones while singing so the mic doesn't pick it up.
+- **Tanpura:** it's always tuned to your Sa, with two sound options:
+  - **Built-in:** a synthesised four-string tanpura (first string, Sa, Sa, kharaj Sa) with jawari. You can set the first string to Pa, Ma or Ni and adjust speed and volume.
+  - **My recording:** load a recording of a real tanpura in any key. The app detects its Sa, retunes it to yours (by at most ±6 semitones) and loops it seamlessly. This gives the sound of a studio-sampled tanpura app. The file stays in your browser and is remembered, and it's never uploaded or added to the repo. Only use recordings you have the rights to.
+
+  Use headphones while singing so the mic doesn't pick up the tanpura.
 - **Recording analysis:** upload an mp3, wav or m4a file and get its notation.
 - **Copy as text:** e.g. `Sa Re Ga(k) Ma(t) Pa Dha(k) Ni Sa' .Ni`
 

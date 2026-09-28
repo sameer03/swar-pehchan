@@ -94,5 +94,20 @@ for (const first of ['Pa', 'Ma', 'Ni']) {
   assert.ok(worst < 3);
 }
 
+// 9. The Sa of a tanpura recording is found, whatever the key and first string
+{
+  const sr = 22050;
+  let worst = 0;
+  for (const [note, oct, first] of [['D', 3, 'Pa'], ['G#', 3, 'Ma'], ['A#', 2, 'Ni'], ['F', 3, 'Pa']]) {
+    const sa = C.noteFreq(note, oct), strings = T.stringFreqs(sa, first).map((f, i) => T.renderString(f, sr, { seconds: 4, seed: i + 3 }));
+    const x = new Float32Array(sr * 10);
+    for (let k = 0, t = 0; t < 9.5; k++, t += 1.05) { const b = strings[k % 4], s = Math.floor(t * sr); for (let i = 0; i < b.length && s + i < x.length; i++) x[s + i] += 0.2 * b[i]; }
+    const got = T.detectRecordingSa(x, sr, C.detectPitch).cents, want = ((1200 * Math.log2(sa / 440)) % 1200 + 1200) % 1200;
+    worst = Math.max(worst, Math.abs(((got - want + 1800) % 1200 + 1200) % 1200 - 600));
+  }
+  console.log(`${worst < 10 ? 'ok  ' : 'FAIL'} recording Sa detection: worst ${worst.toFixed(1)}¢`);
+  assert.ok(worst < 10);
+}
+
 assert.strictEqual(C.westernName(C.noteFreq('A', 4)), 'A4');
 console.log('all tests passed');

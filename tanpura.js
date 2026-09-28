@@ -9,6 +9,9 @@
  *  - a nasal resonance sweeps upward after each pluck (the tanpura's "ooo-eee");
  *  - a soft finger-pad pluck, a warm wooden body, then stereo placement and room reverb.
  *
+ * It can also play a real tanpura recording instead: its Sa is detected, it's retuned to
+ * your Sa (by at most ±6 semitones) and looped with a crossfade so there's no click.
+ *
  * Works in the browser (window.SwarTanpura) and in Node (for tests).
  */
 (function (root) {
@@ -150,6 +153,66 @@
     return ir;
   }
 
+  /**
+   * Find the Sa of a tanpura recording.
+   * Most of a tanpura's strings are Sa, so the most common pitch class is Sa.
+   * Returns Sa as cents above A (0..1200), plus how confident we are (share of voiced frames near it).
+   */
+  function detectRecordingSa(data, sampleRate, detectPitch) {
+    const q = Math.max(1, Math.floor(sampleRate / 11025));
+    const x = [];
+    for (let i = 0; i + q <= data.length; i += q) { let s = 0; for (let j = 0; j < q; j++) s += data[i + j]; x.push(s / q); }
+    const sr = sampleRate / q, FRAME = 1024, HOP = 512, bins = new Float64Array(120);
+    let voiced = 0;
+    const samples = [];
+    for (let i = 0; i + FRAME < x.length; i += HOP) {
+      const fr = Float32Array.from(x.slice(i, i + FRAME));
+      let e = 0; for (const v of fr) e += v * v; e = Math.sqrt(e / FRAME);
+      if (e < 0.003) continue;
+      const p = detectPitch(fr, sr, { minFreq: 50, maxFreq: 1000 });
+      if (!p) continue;
+      const c = (((1200 * Math.log2(p.freq / 440)) % 1200) + 1200) % 1200;
+      bins[Math.floor(c / 10) % 120] += e; samples.push([c, e]); voiced++;
+    }
+    if (voiced < 5) return null;
+    let best = 0, bestV = -1;
+    for (let b = 0; b < 120; b++) {
+      let v = 0; for (let k = -2; k <= 2; k++) v += bins[(b + k + 120) % 120] * (3 - Math.abs(k));
+      if (v > bestV) { bestV = v; best = b; }
+    }
+    // Refine with a weighted circular mean of the frames near the peak
+    const centre = best * 10 + 5;
+    let sum = 0, w = 0, near = 0;
+    for (const [c, e] of samples) {
+      const d = ((c - centre + 1800) % 1200) - 600;
+      if (Math.abs(d) <= 30) { sum += d * e; w += e; near++; }
+    }
+    const cents = ((centre + (w ? sum / w : 0)) % 1200 + 1200) % 1200;
+    return { cents, confidence: near / voiced };
+  }
+
+  /** Make a buffer that loops without a click: the tail is crossfaded into the head. */
+  function makeSeamlessLoop(ctx, buf) {
+    const sr = buf.sampleRate, ch = buf.numberOfChannels;
+    // Trim silence at both ends
+    let start = 0, end = buf.length;
+    const d0 = buf.getChannelData(0), th = 0.01;
+    while (start < end && Math.abs(d0[start]) < th) start++;
+    while (end > start && Math.abs(d0[end - 1]) < th) end--;
+    const L = end - start;
+    const X = Math.min(Math.floor(2 * sr), Math.floor(L / 4));
+    const out = ctx.createBuffer(ch, L - X, sr);
+    for (let c = 0; c < ch; c++) {
+      const src = buf.getChannelData(c).subarray(start, end), dst = out.getChannelData(c);
+      for (let i = 0; i < L - X; i++) dst[i] = src[i];
+      for (let i = 0; i < X; i++) {
+        const k = i / X;   // equal-power crossfade
+        dst[i] = src[i] * Math.sin(k * Math.PI / 2) + src[L - X + i] * Math.cos(k * Math.PI / 2);
+      }
+    }
+    return out;
+  }
+
   /** The four strings for a given Sa: first string (mandra), Sa, Sa, kharaj Sa. */
   function stringFreqs(saFreq, first) {
     return [saFreq * (FIRST_STRING[first] || FIRST_STRING.Pa) / 2, saFreq, saFreq, saFreq / 2];
@@ -165,8 +228,13 @@
       this.volume = 0.5;
       this.playing = false;
       this.buffers = null;
+      this.mode = 'synth';  // or 'recording'
+      this.rec = null;      // { buffer, saCents, name }
+      this.recSrc = null;
+      this.out = ctx.createGain();          // volume + fade in/out for both sources
+      this.out.gain.value = 0;
+      this.out.connect(ctx.destination);
       this.master = ctx.createGain();
-      this.master.gain.value = 0;
       const tone = ctx.createBiquadFilter();
       tone.type = 'lowpass'; tone.frequency.value = 3400; tone.Q.value = 0.4;
       // Gentle roll-off below ~110 Hz so the low strings don't rumble on laptop or phone speakers
@@ -182,8 +250,8 @@
       const wet = ctx.createGain(); wet.gain.value = 0.35;
       const verb = ctx.createConvolver();
       verb.buffer = makeRoom(ctx, 2.6);
-      tone.connect(dry).connect(ctx.destination);
-      tone.connect(verb).connect(wet).connect(ctx.destination);
+      tone.connect(dry).connect(this.out);
+      tone.connect(verb).connect(wet).connect(this.out);
       this.pans = [-0.35, -0.1, 0.12, 0.3].map((p) => {
         const n = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
         if (n.pan) n.pan.value = p;
@@ -238,44 +306,91 @@
       }
     }
 
-    start() {
-      if (this.playing) return;
-      if (!this.buffers) this._render();
-      this.playing = true;
-      this.step = 0;
-      this.nextTime = this.ctx.currentTime + 0.05;
-      const g = this.master.gain;
-      g.cancelScheduledValues(this.ctx.currentTime);
-      g.setTargetAtTime(this.volume, this.ctx.currentTime, 0.05);
-      this._schedule();
-      this._timer = setInterval(() => this._schedule(), 60);
+    /** Use a real tanpura recording. saCents = its Sa as cents above A (from detectRecordingSa). */
+    setRecording(audioBuffer, saCents, name) {
+      const wasPlaying = this.playing && this.mode === 'recording';
+      if (wasPlaying) this._stopRecording(0.05);
+      this.rec = { buffer: makeSeamlessLoop(this.ctx, audioBuffer), saCents, name };
+      if (wasPlaying) this._startRecording();
     }
 
-    stop() {
+    setMode(mode) {
+      if (mode === 'recording' && !this.rec) return;
+      if (mode === this.mode) return;
+      const was = this.playing;
+      if (was) this.stop(true);
+      this.mode = mode;
+      if (was) this.start();
+    }
+
+    /** Playback-rate that moves the recording's Sa onto ours, by the smallest shift (at most ±6 semitones). */
+    recordingShift() {
+      if (!this.rec) return 0;
+      const ours = ((1200 * Math.log2(this.saFreq / 440)) % 1200 + 1200) % 1200;
+      return ((ours - this.rec.saCents + 1800) % 1200 + 1200) % 1200 - 600;
+    }
+
+    _startRecording() {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.rec.buffer;
+      src.loop = true;
+      src.playbackRate.value = Math.pow(2, this.recordingShift() / 1200);
+      src.connect(this.out);
+      src.start();
+      this.recSrc = src;
+    }
+
+    _stopRecording(after) {
+      if (!this.recSrc) return;
+      this.recSrc.stop(this.ctx.currentTime + after);
+      this.recSrc = null;
+    }
+
+    start() {
+      if (this.playing) return;
+      this.playing = true;
+      if (this.mode === 'recording' && this.rec) {
+        this._startRecording();
+      } else {
+        if (!this.buffers) this._render();
+        this.step = 0;
+        this.nextTime = this.ctx.currentTime + 0.05;
+        this._schedule();
+        this._timer = setInterval(() => this._schedule(), 60);
+      }
+      const g = this.out.gain;
+      g.cancelScheduledValues(this.ctx.currentTime);
+      g.setTargetAtTime(this.volume, this.ctx.currentTime, 0.08);
+    }
+
+    stop(quick) {
       if (!this.playing) return;
       this.playing = false;
       clearInterval(this._timer);
-      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.25);
+      const tc = quick ? 0.03 : 0.25;
+      this.out.gain.setTargetAtTime(0, this.ctx.currentTime, tc);
+      this._stopRecording(tc * 6);
     }
 
     setVolume(v) {
       this.volume = v;
-      if (this.playing) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+      if (this.playing) this.out.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
     }
     setSpeed(s) { this.speed = s; }
     setSa(freq) {
       if (Math.abs(freq - this.saFreq) < 0.01 && this.buffers) return;
       this.saFreq = freq; this.buffers = null;
-      if (this.playing) this._render();
+      if (this.recSrc) this.recSrc.playbackRate.setTargetAtTime(Math.pow(2, this.recordingShift() / 1200), this.ctx.currentTime, 0.05);
+      if (this.playing && this.mode === 'synth') this._render();
     }
     setFirst(first) {
       if (first === this.first && this.buffers) return;
       this.first = first; this.buffers = null;
-      if (this.playing) this._render();
+      if (this.playing && this.mode === 'synth') this._render();
     }
   }
 
-  const api = { renderString, stringFreqs, Tanpura, FIRST_STRING };
+  const api = { renderString, stringFreqs, Tanpura, FIRST_STRING, detectRecordingSa, makeSeamlessLoop };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SwarTanpura = api;
 })(typeof window !== 'undefined' ? window : this);

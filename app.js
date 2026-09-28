@@ -9,6 +9,7 @@
     saNote: $('saNote'), saOct: $('saOct'), saHz: $('saHz'),
     setSaBtn: $('setSaBtn'), tanpuraBtn: $('tanpuraBtn'),
     tFirst: $('tFirst'), tSpeed: $('tSpeed'), tVol: $('tVol'), tanpuraPanel: $('tanpuraPanel'),
+    tSound: $('tSound'), tLoadBtn: $('tLoadBtn'), tFile: $('tFile'), tStatus: $('tStatus'),
     minDur: $('minDur'), minDurVal: $('minDurVal'), detail: $('detail'),
     nowSwar: $('nowSwar'), nowDetail: $('nowDetail'), needle: $('meterNeedle'),
     trace: $('trace'), transcript: $('transcript'),
@@ -35,7 +36,7 @@
   function updateSa(freq) {
     saFreq = freq || C.noteFreq(els.saNote.value, +els.saOct.value);
     els.saHz.textContent = saFreq.toFixed(1) + ' Hz';
-    if (tanpura) tanpura.setSa(saFreq);
+    if (tanpura) { tanpura.setSa(saFreq); if (tanpura.rec && els.tSound.value === 'recording') describeShift(); }
   }
   els.saNote.addEventListener('change', () => updateSa());
   els.saOct.addEventListener('change', () => updateSa());
@@ -250,6 +251,10 @@
       tanpura.setVolume(+els.tVol.value);
       tanpura.setSa(saFreq);
     }
+    if (!tanpura.playing && els.tSound.value === 'recording' && !(await ensureRecording())) {
+      return; // the file picker is open; loading a file starts the tanpura
+    }
+    tanpura.setMode(els.tSound.value);
     if (tanpura.playing) tanpura.stop();
     else tanpura.start();
     els.tanpuraBtn.setAttribute('aria-pressed', String(tanpura.playing));
@@ -259,6 +264,119 @@
   els.tFirst.addEventListener('change', () => tanpura && tanpura.setFirst(els.tFirst.value));
   els.tSpeed.addEventListener('input', () => tanpura && tanpura.setSpeed(+els.tSpeed.value));
   els.tVol.addEventListener('input', () => tanpura && tanpura.setVolume(+els.tVol.value));
+
+  /* ---------- Real tanpura recording ---------- */
+  // The file stays in this browser (IndexedDB) so it only has to be loaded once. It is never uploaded.
+  let recFile = null;   // { name, bytes } from storage, decoded lazily
+  let recLoaded = false;
+
+  const store = {
+    db() {
+      return new Promise((res, rej) => {
+        const r = indexedDB.open('swar-pehchaan', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('files');
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+    },
+    async get(key) {
+      const db = await this.db();
+      return new Promise((res) => { const q = db.transaction('files').objectStore('files').get(key); q.onsuccess = () => res(q.result); q.onerror = () => res(null); });
+    },
+    async put(key, val) {
+      const db = await this.db();
+      return new Promise((res) => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(val, key); tx.oncomplete = res; tx.onerror = res; });
+    },
+  };
+
+  function syncSoundControls() {
+    const rec = els.tSound.value === 'recording';
+    els.tFirst.disabled = rec; els.tSpeed.disabled = rec;
+    els.tanpuraPanel.classList.toggle('rec-mode', rec);
+  }
+
+  function describeShift() {
+    if (!tanpura || !tanpura.rec) return;
+    const r = tanpura.rec, shift = tanpura.recordingShift();
+    const recName = C.WESTERN[Math.round((r.saCents / 100 + 9)) % 12];
+    const semis = Math.round(shift / 10) / 10;
+    let msg = `“${r.name}” · its Sa is ${recName}. `;
+    const unit = Math.abs(semis) === 1 ? 'semitone' : 'semitones';
+    msg += Math.abs(shift) < 3 ? 'Already in your key.' : `Retuned ${semis > 0 ? 'up' : 'down'} ${Math.abs(semis)} ${unit} to your Sa.`;
+    if (Math.abs(shift) > 300) msg += ' Big shifts also change the speed; a recording nearer your key will sound more natural.';
+    els.tStatus.textContent = msg;
+  }
+
+  /** Decode + analyse a recording (bytes: ArrayBuffer). */
+  async function useRecording(name, bytes) {
+    await ensureCtx();
+    if (!tanpura) {
+      tanpura = new window.SwarTanpura.Tanpura(ctx);
+      tanpura.setFirst(els.tFirst.value); tanpura.setSpeed(+els.tSpeed.value);
+      tanpura.setVolume(+els.tVol.value); tanpura.setSa(saFreq);
+    }
+    els.tStatus.textContent = 'Reading the recording…';
+    const audio = await ctx.decodeAudioData(bytes.slice(0));
+    const mono = new Float32Array(audio.length);
+    for (let c = 0; c < audio.numberOfChannels; c++) {
+      const d = audio.getChannelData(c);
+      for (let i = 0; i < d.length; i++) mono[i] += d[i] / audio.numberOfChannels;
+    }
+    const found = window.SwarTanpura.detectRecordingSa(mono, audio.sampleRate, C.detectPitch);
+    if (!found) throw new Error('no pitch');
+    tanpura.setRecording(audio, found.cents, name);
+    recLoaded = true;
+    describeShift();
+    if (found.confidence < 0.3) els.tStatus.textContent += ' (Couldn’t hear a clear Sa, so the tuning may be off.)';
+  }
+
+  async function ensureRecording() {
+    if (recLoaded) return true;
+    if (!recFile) { els.tFile.click(); return false; }
+    try { await useRecording(recFile.name, recFile.bytes); return true; }
+    catch { els.tStatus.textContent = 'Couldn’t read the saved recording. Load it again.'; return false; }
+  }
+
+  els.tLoadBtn.addEventListener('click', () => els.tFile.click());
+  els.tFile.addEventListener('change', async () => {
+    const f = els.tFile.files[0];
+    els.tFile.value = '';
+    if (!f) return;
+    try {
+      const bytes = await f.arrayBuffer();
+      recLoaded = false;
+      await useRecording(f.name, bytes);
+      recFile = { name: f.name, bytes };
+      try { await store.put('tanpura', recFile); } catch { /* storage unavailable: works for this visit */ }
+      els.tSound.value = 'recording'; syncSoundControls();
+      tanpura.setMode('recording');
+      if (!tanpura.playing) await toggleTanpura();
+    } catch {
+      els.tStatus.textContent = 'Couldn’t use that file. Try a wav, mp3 or m4a of a tanpura playing.';
+    }
+  });
+
+  els.tSound.addEventListener('change', async () => {
+    syncSoundControls();
+    if (els.tSound.value === 'recording') {
+      if (!(await ensureRecording())) { els.tSound.value = 'synth'; syncSoundControls(); return; }
+    } else {
+      els.tStatus.textContent = '';
+    }
+    if (tanpura) tanpura.setMode(els.tSound.value);
+    if (els.tSound.value === 'recording') describeShift();
+  });
+
+  // Offer the recording saved on an earlier visit
+  (async () => {
+    try {
+      const saved = await store.get('tanpura');
+      if (saved && saved.bytes) {
+        recFile = saved;
+        els.tSound.value = 'recording'; syncSoundControls();
+        els.tStatus.textContent = `Using your recording “${saved.name}”.`;
+      }
+    } catch { /* no storage */ }
+  })();
 
   /* ---------- Pitch trace ---------- */
   const tctx = els.trace.getContext('2d');

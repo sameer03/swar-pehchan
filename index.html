@@ -61,6 +61,17 @@
         <span>Tanpura</span>
       </button>
       <div class="field">
+        <label for="tSound">Sound</label>
+        <div class="row nowrap">
+          <select id="tSound">
+            <option value="synth" selected>Built-in</option>
+            <option value="recording">My recording</option>
+          </select>
+          <button id="tLoadBtn" class="btn" type="button">Load…</button>
+          <input id="tFile" type="file" accept="audio/*" hidden>
+        </div>
+      </div>
+      <div class="field">
         <label for="tFirst">First string</label>
         <select id="tFirst">
           <option value="Pa" selected>Pa · most ragas</option>
@@ -76,7 +87,8 @@
         <label for="tVol">Volume</label>
         <input id="tVol" type="range" min="0" max="1" step="0.02" value="0.5">
       </div>
-      <p class="hint muted">Tuned to your Sa. Use headphones while singing, otherwise the mic hears the tanpura too.</p>
+      <p id="tStatus" class="hint status" aria-live="polite"></p>
+      <p class="hint muted">Always tuned to your Sa. For the sound of a real instrument, load a recording of a tanpura (any key). The app finds its Sa, retunes it and loops it, and remembers it in this browser. Use headphones while singing, otherwise the mic hears the tanpura too.</p>
     </section>
 
     <section class="live panel" aria-live="polite">
