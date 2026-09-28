@@ -38,7 +38,7 @@
         <span class="label">Find it</span>
         <div class="row">
           <button id="setSaBtn" class="btn">Sing your Sa</button>
-          <button id="droneBtn" class="btn" aria-pressed="false">Sa–Pa drone</button>
+
         </div>
       </div>
       <div class="field">
@@ -53,6 +53,30 @@
         <label for="minDur">Main-note hold <span id="minDurVal" class="muted mono">120 ms</span></label>
         <input id="minDur" type="range" min="60" max="400" step="10" value="120">
       </div>
+    </section>
+
+    <section id="tanpuraPanel" class="panel tanpura" aria-label="Tanpura">
+      <button id="tanpuraBtn" class="btn tanpura-btn" aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><ellipse cx="12" cy="18" rx="5.5" ry="4.5"/><path d="M12 13.5V2.5M10.4 3.5v10.4M13.6 3.5v10.4"/></g></svg>
+        <span>Tanpura</span>
+      </button>
+      <div class="field">
+        <label for="tFirst">First string</label>
+        <select id="tFirst">
+          <option value="Pa" selected>Pa · most ragas</option>
+          <option value="Ma">Ma · Malkauns etc.</option>
+          <option value="Ni">Ni · Marwa etc.</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tSpeed">Speed</label>
+        <input id="tSpeed" type="range" min="0.6" max="1.6" step="0.05" value="1">
+      </div>
+      <div class="field">
+        <label for="tVol">Volume</label>
+        <input id="tVol" type="range" min="0" max="1" step="0.02" value="0.5">
+      </div>
+      <p class="hint muted">Tuned to your Sa. Use headphones while singing, otherwise the mic hears the tanpura too.</p>
     </section>
 
     <section class="live panel" aria-live="polite">
@@ -102,6 +126,7 @@
   </main>
 
   <script src="swar-core.js"></script>
+  <script src="tanpura.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

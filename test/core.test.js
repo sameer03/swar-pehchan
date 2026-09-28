@@ -80,5 +80,19 @@ check('murki (main notes only)', transcribe(sing([[4, 4, 0.35], [7, 7, 0.06], [9
 check('breathy voice', transcribe(sing([[0, 0, 0.35, { vibrato: 0.2 }], [2, 2, 0.35, { vibrato: 0.2 }], [4, 4, 0.35, { vibrato: 0.2 }], null], 0.12)),
   'Sa Re Ga');
 
+// 8. Tanpura strings are in tune with Sa (first string Pa, Ma or Ni)
+const T = require('../tanpura.js');
+for (const first of ['Pa', 'Ma', 'Ni']) {
+  const freqs = T.stringFreqs(SA, first);
+  const cents = freqs.map((f) => {
+    const b = T.renderString(f, 48000, { seconds: 1.5 });
+    const p = C.detectPitch(b.subarray(24000, 28096), 48000, { minFreq: 50 });
+    return Math.abs(1200 * Math.log2(p.freq / f));
+  });
+  const worst = Math.max(...cents);
+  console.log(`${worst < 3 ? 'ok  ' : 'FAIL'} tanpura tuned (${first}): worst ${worst.toFixed(1)}¢`);
+  assert.ok(worst < 3);
+}
+
 assert.strictEqual(C.westernName(C.noteFreq('A', 4)), 'A4');
 console.log('all tests passed');

@@ -13,7 +13,7 @@ It runs entirely in the browser. There's no server and no install, and your audi
 - **Octave marks:** a dot below means mandra (lower octave) and a dot above means taar (upper octave).
 - **Your own Sa:** pick it from a list (C … B), or press **Sing your Sa** and hold your note for 2 seconds.
 - **Tuning meter and pitch trace:** see how many cents sharp or flat you are, and see your meend and andolan against the swar lines.
-- **Sa–Pa drone:** a simple tanpura-like reference to sing against.
+- **Tanpura:** a synthesised four-string tanpura (first string, Sa, Sa, kharaj Sa) with jawari buzz, automatically tuned to your Sa. You can set the first string to Pa, Ma or Ni and adjust speed and volume. Use headphones while singing so the mic doesn't pick it up.
 - **Recording analysis:** upload an mp3, wav or m4a file and get its notation.
 - **Copy as text:** e.g. `Sa Re Ga(k) Ma(t) Pa Dha(k) Ni Sa' .Ni`
 
@@ -43,7 +43,7 @@ python3 -m http.server 8000
 | Swar | `semitones = 12 · log2(f / Sa)`, rounded to the nearest of the 12 swaras. The remainder is shown in cents. |
 | Notes | A median filter removes octave blips. The voice has to move more than about half a semitone to count as a new swar, so vibrato and andolan don't split a note. Swaras touched for 25–45 ms or more are written. Those held past the *main-note hold* are main notes, and shorter ones become kan swaras. A slide lasting 60 ms or more between two written swaras is marked as meend. |
 
-The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The UI is in `app.js`.
+The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The tanpura is in [`tanpura.js`](tanpura.js): each string is built from up to 48 harmonics whose upper overtones swell shortly after the pluck, the way a jawari bridge makes them. The UI is in `app.js`.
 
 ### Notation used
 
@@ -69,7 +69,7 @@ The core logic is in [`swar-core.js`](swar-core.js) and has no dependencies. The
 node test/core.test.js
 ```
 
-This synthesises sung phrases (vibrato, kan swar, meend, andolan, murki, a breathy voice) and checks each one is transcribed correctly.
+This synthesises sung phrases (vibrato, kan swar, meend, andolan, murki, a breathy voice) and checks each one is transcribed correctly. It also checks that the tanpura strings are in tune.
 
 ## Roadmap ideas
 

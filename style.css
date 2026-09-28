@@ -124,3 +124,14 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
   .swar-big { font-size: 64px; }
   #trace { height: 260px; }
 }
+
+/* Tanpura panel */
+.tanpura { display: grid; grid-template-columns: auto minmax(170px, 1.2fr) 1fr 1fr; gap: 12px 20px; align-items: end; }
+.tanpura .hint { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.tanpura-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 16px; border-radius: 999px; }
+.tanpura.on { border-color: var(--accent); }
+.tanpura.on .tanpura-btn svg { animation: strum 2.2s ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes strum { 0%, 100% { transform: rotate(0); } 12% { transform: rotate(-4deg); } 24% { transform: rotate(3deg); } 36% { transform: rotate(0); } }
+@media (prefers-reduced-motion: reduce) { .tanpura.on .tanpura-btn svg { animation: none; } }
+@media (max-width: 620px) { .tanpura { grid-template-columns: 1fr; } .tanpura-btn { justify-self: start; } }
+#tFirst { width: 100%; }

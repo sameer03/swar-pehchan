@@ -7,7 +7,8 @@
   const els = {
     micBtn: $('micBtn'), micLabel: $('micLabel'),
     saNote: $('saNote'), saOct: $('saOct'), saHz: $('saHz'),
-    setSaBtn: $('setSaBtn'), droneBtn: $('droneBtn'),
+    setSaBtn: $('setSaBtn'), tanpuraBtn: $('tanpuraBtn'),
+    tFirst: $('tFirst'), tSpeed: $('tSpeed'), tVol: $('tVol'), tanpuraPanel: $('tanpuraPanel'),
     minDur: $('minDur'), minDurVal: $('minDurVal'), detail: $('detail'),
     nowSwar: $('nowSwar'), nowDetail: $('nowDetail'), needle: $('meterNeedle'),
     trace: $('trace'), transcript: $('transcript'),
@@ -19,7 +20,7 @@
   let ctx = null, stream = null, analyser = null, rafId = 0, buf = null;
   let saFreq = 0;
   let calibrating = null; // { until, samples: [] }
-  let drone = null;
+  let tanpura = null;
   const history = []; // { t, semi } for the trace
   const TRACE_SECONDS = 8;
 
@@ -34,7 +35,7 @@
   function updateSa(freq) {
     saFreq = freq || C.noteFreq(els.saNote.value, +els.saOct.value);
     els.saHz.textContent = saFreq.toFixed(1) + ' Hz';
-    if (drone) { stopDrone(); startDrone(); }
+    if (tanpura) tanpura.setSa(saFreq);
   }
   els.saNote.addEventListener('change', () => updateSa());
   els.saOct.addEventListener('change', () => updateSa());
@@ -239,34 +240,25 @@
     els.nowDetail.textContent = `Sa set to ${median.toFixed(1)} Hz (≈ ${C.westernName(median)})`;
   }
 
-  /* ---------- Tanpura-ish drone ---------- */
-  async function startDrone() {
+  /* ---------- Tanpura ---------- */
+  async function toggleTanpura() {
     await ensureCtx();
-    const g = ctx.createGain();
-    g.gain.value = 0.0001;
-    g.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.6);
-    g.connect(ctx.destination);
-    const oscs = [
-      [saFreq / 2, 'sawtooth', 0.35], [saFreq * 1.5 / 2, 'sawtooth', 0.25], [saFreq, 'triangle', 0.5],
-    ].map(([f, type, amp]) => {
-      const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1200;
-      const og = ctx.createGain(); og.gain.value = amp;
-      o.connect(lp).connect(og).connect(g); o.start();
-      return o;
-    });
-    drone = { g, oscs };
-    els.droneBtn.setAttribute('aria-pressed', 'true');
+    if (!tanpura) {
+      tanpura = new window.SwarTanpura.Tanpura(ctx);
+      tanpura.setFirst(els.tFirst.value);
+      tanpura.setSpeed(+els.tSpeed.value);
+      tanpura.setVolume(+els.tVol.value);
+      tanpura.setSa(saFreq);
+    }
+    if (tanpura.playing) tanpura.stop();
+    else tanpura.start();
+    els.tanpuraBtn.setAttribute('aria-pressed', String(tanpura.playing));
+    els.tanpuraPanel.classList.toggle('on', tanpura.playing);
   }
-  function stopDrone() {
-    if (!drone) return;
-    const { g, oscs } = drone;
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
-    oscs.forEach((o) => o.stop(ctx.currentTime + 0.35));
-    drone = null;
-    els.droneBtn.setAttribute('aria-pressed', 'false');
-  }
-  els.droneBtn.addEventListener('click', () => (drone ? stopDrone() : startDrone()));
+  els.tanpuraBtn.addEventListener('click', toggleTanpura);
+  els.tFirst.addEventListener('change', () => tanpura && tanpura.setFirst(els.tFirst.value));
+  els.tSpeed.addEventListener('input', () => tanpura && tanpura.setSpeed(+els.tSpeed.value));
+  els.tVol.addEventListener('input', () => tanpura && tanpura.setVolume(+els.tVol.value));
 
   /* ---------- Pitch trace ---------- */
   const tctx = els.trace.getContext('2d');
