@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swar Pehchaan</title>
+  <meta name="description" content="Sing into your microphone and see the Indian classical sargam notation (Sa Re Ga Ma Pa Dha Ni) of what you sang.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <div>
+        <h1>Swar Pehchaan</h1>
+        <p class="tag">Sing, and see your sargam.</p>
+      </div>
+      <button id="micBtn" class="btn primary big" aria-pressed="false">
+        <span class="dot" aria-hidden="true"></span><span id="micLabel">Start listening</span>
+      </button>
+    </header>
+
+    <section class="panel controls" aria-label="Settings">
+      <div class="field">
+        <label for="saNote">Your Sa</label>
+        <div class="row">
+          <select id="saNote"></select>
+          <select id="saOct" aria-label="Sa octave">
+            <option value="2">oct 2</option>
+            <option value="3" selected>oct 3</option>
+            <option value="4">oct 4</option>
+          </select>
+          <span id="saHz" class="muted mono"></span>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">Find it</span>
+        <div class="row">
+          <button id="setSaBtn" class="btn">Sing your Sa</button>
+          <button id="droneBtn" class="btn" aria-pressed="false">Sa–Pa drone</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="minDur">Hold time <span id="minDurVal" class="muted mono">120 ms</span></label>
+        <input id="minDur" type="range" min="50" max="350" step="10" value="120">
+      </div>
+    </section>
+
+    <section class="live panel" aria-live="polite">
+      <div class="now">
+        <div id="nowSwar" class="swar-big" data-top="" data-bot="">—</div>
+        <div id="nowDetail" class="muted">Press “Start listening” and sing</div>
+      </div>
+      <div class="meter" aria-hidden="true">
+        <div class="meter-scale"><span>−50¢</span><span>0</span><span>+50¢</span></div>
+        <div class="meter-track"><div id="meterNeedle" class="needle"></div></div>
+      </div>
+      <canvas id="trace" height="300" aria-label="Pitch trace"></canvas>
+    </section>
+
+    <section class="panel">
+      <div class="head-row">
+        <h2>Notation</h2>
+        <div class="row">
+          <button id="copyBtn" class="btn">Copy</button>
+          <button id="clearBtn" class="btn">Clear</button>
+        </div>
+      </div>
+      <div id="transcript" class="transcript"><span class="muted">Notes you sing appear here. A pause starts a new phrase.</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>Analyse a recording</h2>
+      <p class="muted">Upload an audio file (mp3, wav, m4a). Works best with a solo voice or single instrument; set Sa above first.</p>
+      <div class="row">
+        <input id="fileIn" type="file" accept="audio/*">
+        <span id="fileStatus" class="muted"></span>
+      </div>
+    </section>
+
+    <footer class="legend panel">
+      <h2>Reading the notation</h2>
+      <ul>
+        <li><span class="sw komal">Re</span> underline = komal (flat): Re, Ga, Dha, Ni</li>
+        <li><span class="sw" data-top="|">Ma</span> tick above = tivra (sharp) Ma</li>
+        <li><span class="sw" data-bot="•">Ni</span> dot below = mandra (lower octave)</li>
+        <li><span class="sw" data-top="•">Sa</span> dot above = taar (upper octave)</li>
+      </ul>
+      <p class="muted">Copied text uses <code>Re(k)</code> for komal, <code>Ma(t)</code> for tivra, <code>.Ni</code> for mandra and <code>Sa'</code> for taar.</p>
+    </footer>
+  </main>
+
+  <script src="swar-core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
