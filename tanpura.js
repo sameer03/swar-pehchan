@@ -73,12 +73,12 @@
     o = Object.assign({
       seconds: 8, seed: 7,
       t60: 16,            // ring time of the fundamental (s)
-      loopBright: 0.9,    // how long the upper harmonics survive
-      contact: 2.5,       // jawari: how strongly the string grazes the bridge
+      loopBright: 0.72,   // how long the upper harmonics survive (lower = mellower)
+      contact: 0.8,       // jawari: how strongly the string grazes the bridge (higher = buzzier)
       contactSmooth: 0.2,
-      pluckSoft: 0.08,    // finger-pad pluck (lower = softer, warmer attack)
-      pluckPos: 0.13,     // where along the string it's plucked
-      sweepFrom: 700, sweepTo: 3200, sweepTime: 1.1, formantGain: 12, formantQ: 2.2,
+      pluckSoft: 0.05,    // finger-pad pluck (lower = softer, warmer attack)
+      pluckPos: 0.2,      // where along the string it's plucked (nearer the middle = rounder)
+      sweepFrom: 700, sweepTo: 2200, sweepTime: 1.1, formantGain: 4, formantQ: 1.6,
     }, o || {});
     const n = Math.floor(o.seconds * sr);
     const rnd = makeRandom(o.seed);
@@ -116,7 +116,7 @@
     }
 
     // Wooden body: gentle warmth around 200 Hz
-    co = peaking(210, sr, 0.9, 3); x1 = x2 = y1 = y2 = 0;
+    co = peaking(200, sr, 0.7, -7); x1 = x2 = y1 = y2 = 0;   // thin out the boomy low-mids
     for (let i = 0; i < n; i++) {
       const x = out[i], y = co[0] * x + co[1] * x1 + co[2] * x2 - co[3] * y1 - co[4] * y2;
       x2 = x1; x1 = x; y2 = y1; y1 = y; out[i] = y;
@@ -168,8 +168,15 @@
       this.master = ctx.createGain();
       this.master.gain.value = 0;
       const tone = ctx.createBiquadFilter();
-      tone.type = 'lowpass'; tone.frequency.value = 7000; tone.Q.value = 0.4;
-      this.master.connect(tone);
+      tone.type = 'lowpass'; tone.frequency.value = 3400; tone.Q.value = 0.4;
+      // Gentle roll-off below ~110 Hz so the low strings don't rumble on laptop or phone speakers
+      const lowcut = ctx.createBiquadFilter();
+      lowcut.type = 'highpass'; lowcut.frequency.value = 140; lowcut.Q.value = 0.6;
+      const shelf = ctx.createBiquadFilter();           // lighter low end overall
+      shelf.type = 'lowshelf'; shelf.frequency.value = 300; shelf.gain.value = -5;
+      const deBuzz = ctx.createBiquadFilter();          // soften the nasal edge
+      deBuzz.type = 'peaking'; deBuzz.frequency.value = 1800; deBuzz.Q.value = 0.9; deBuzz.gain.value = -4;
+      this.master.connect(lowcut).connect(shelf).connect(deBuzz).connect(tone);
       // Dry signal plus a small, warm room
       const dry = ctx.createGain(); dry.gain.value = 0.8;
       const wet = ctx.createGain(); wet.gain.value = 0.35;
@@ -192,10 +199,10 @@
       // Strings 2 and 3 are both Sa but never quite identical, so render them separately.
       // Every string is set up slightly differently, as on a real instrument.
       const opts = [
-        { seed: 11, contact: 2.3, sweepTo: 3000 },
-        { seed: 23, contact: 2.6, sweepTo: 3400 },
-        { seed: 37, contact: 2.4, sweepTo: 3200, sweepTime: 1.3 },
-        { seed: 51, contact: 2.0, sweepTo: 2600, t60: 20, seconds: 9 },
+        { seed: 11, contact: 0.75, sweepTo: 2100 },
+        { seed: 23, contact: 0.85, sweepTo: 2300 },
+        { seed: 37, contact: 0.8, sweepTo: 2200, sweepTime: 1.3 },
+        { seed: 51, contact: 0.6, sweepTo: 1800, t60: 18, seconds: 9 },
       ];
       this.buffers = freqs.map((f, i) => {
         const data = renderString(f * (i === 2 ? 1.0004 : 1), sr, opts[i]);
@@ -208,7 +215,7 @@
     /** Pluck times within one cycle, in seconds (scaled by speed). */
     _pattern() {
       const u = 1.05 / this.speed;
-      return { times: [0, u, 2 * u, 3 * u], cycle: 4.6 * u, gains: [0.75, 0.65, 0.65, 0.9] };
+      return { times: [0, u, 2 * u, 3 * u], cycle: 4.6 * u, gains: [0.6, 0.85, 0.85, 0.35] };
     }
 
     _pluck(i, when) {
