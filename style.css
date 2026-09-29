@@ -142,3 +142,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .tanpura.rec-mode #tFirst, .tanpura.rec-mode #tSpeed { opacity: .45; }
 select:disabled, input:disabled { cursor: not-allowed; }
 @media (max-width: 900px) and (min-width: 621px) { .tanpura { grid-template-columns: auto 1fr 1fr; } }
+
+/* Playback */
+.btn.play { display: inline-flex; align-items: center; gap: 7px; }
+.play-icon { width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent currentColor; }
+.btn.play[aria-pressed="true"] .play-icon { width: 9px; height: 9px; border: 0; background: currentColor; border-radius: 1px; }
+.transcript .sw { cursor: pointer; border-radius: 6px; transition: background-color .08s; background: no-repeat center / 100% 1.35em; }
+.transcript .sw:hover { background-image: linear-gradient(var(--accent-soft), var(--accent-soft)); }
+.transcript .sw.playing { background-image: linear-gradient(var(--accent), var(--accent)); color: #fff; }
+.transcript .sw.kan.playing { color: #fff; }
+.head-row { flex-wrap: wrap; }

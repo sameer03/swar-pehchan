@@ -142,7 +142,7 @@
    * Events:
    *  {type:'note', id, swar, meend}  a swar has been touched long enough to write down
    *  {type:'main', id}               …and has now been held long enough to be a main note
-   *  {type:'end',  id, kind, duration} the swar finished; kind is 'main' or 'kan'
+   *  {type:'end',  id, time, kind, duration} the swar finished at `time`; kind is 'main' or 'kan'
    *  {type:'gap'}                    a pause (new phrase)
    * meend = true when the voice slid into this swar through notes too brief to write.
    */
@@ -226,10 +226,68 @@
       this.cur = null;
       if (!c.written) { this.passing = true; return; } // slid through it
       this.prev = { semi: c.semi, id: c.id, main: c.main, last: c.last };
-      this.onEvent({ type: 'end', id: c.id, kind: c.main ? 'main' : 'kan', duration: c.last - c.start });
+      this.onEvent({ type: 'end', id: c.id, time: c.last, kind: c.main ? 'main' : 'kan', duration: c.last - c.start });
     }
     /** Call at end of a recording to close the last note. */
     flush(time) { this.push(time, null); this.push(time + this.gapTime + 1, null); }
+  }
+
+
+  /**
+   * Turn transcribed notes into a playback plan.
+   * items: [{kind:'main'|'kan'|'pending'|'gap', swar:{semi}, meend, start, end}]
+   * Returns phrases, each a continuous voice:
+   *   { t0, t1, points:[{t, semi, glide}], notes:[{item, t0, t1}] }
+   * Times start at 0 and are divided by `speed`. Pauses between phrases are shortened to
+   * `maxPause` seconds, and small breaks inside a phrase are joined (legato), as in singing.
+   */
+  function playbackPlan(items, opts) {
+    const o = Object.assign({ speed: 1, maxPause: 0.8, legato: 0.25, minNote: 0.05, jump: 0.018, minMeend: 0.1 }, opts || {});
+    const phrases = [];
+    let cur = null;
+    const notes = items.filter((i) => i.kind === 'gap' || (i.swar && i.start != null));
+    for (let k = 0; k < notes.length; k++) {
+      const it = notes[k];
+      if (it.kind === 'gap') { cur = null; continue; }
+      const next = notes[k + 1] && notes[k + 1].kind !== 'gap' ? notes[k + 1] : null;
+      let t0 = it.start;
+      let t1 = it.end != null ? it.end : next ? next.start : it.start + 0.4;
+      t1 = Math.max(t1, t0 + o.minNote);
+      if (next && next.start - t1 < o.legato && !next.meend) t1 = Math.max(t1, next.start); // legato join
+      if (!cur || (it.meend !== true && t0 - cur.t1 > o.legato)) {
+        cur = { t0, t1, points: [], notes: [] };
+        phrases.push(cur);
+      }
+      const prev = cur.notes[cur.notes.length - 1];
+      if (it.meend && prev) {
+        // Meend: hold the previous swar, then slide into this one. The detector only sees the middle
+        // of a slide, so widen it (at least minMeend) so it sounds like the glide that was sung.
+        const slideEnd = t0 + 0.03;
+        const slideStart = Math.max(prev.t0 + 0.04, Math.min(prev.t1 - 0.03, slideEnd - o.minMeend));
+        prev.t1 = Math.min(prev.t1, slideStart);
+        cur.points.push({ t: slideStart, semi: prev.item.swar.semi, glide: false });
+        cur.points.push({ t: slideEnd, semi: it.swar.semi, glide: true });
+      } else if (prev) {
+        cur.points.push({ t: t0 - o.jump, semi: prev.item.swar.semi, glide: false });
+        cur.points.push({ t: t0, semi: it.swar.semi, glide: true });
+      } else {
+        cur.points.push({ t: t0, semi: it.swar.semi, glide: false });
+      }
+      cur.notes.push({ item: it, t0, t1 });
+      cur.t1 = Math.max(cur.t1, t1);
+    }
+    // Close up long pauses and rebase to 0
+    let shift = 0, lastEnd = null;
+    for (const p of phrases) {
+      if (lastEnd == null) shift = p.t0;
+      else if (p.t0 - lastEnd > o.maxPause) shift += p.t0 - lastEnd - o.maxPause;
+      lastEnd = p.t1;
+      const f = (t) => (t - shift) / o.speed;
+      p.t0 = f(p.t0); p.t1 = f(p.t1);
+      p.points.forEach((q) => { q.t = Math.max(p.t0, f(q.t)); });
+      p.notes.forEach((n) => { n.t0 = f(n.t0); n.t1 = f(n.t1); });
+    }
+    return phrases;
   }
 
   /** Plain-text notation from a list of {kind:'main'|'kan'|'gap', swar, meend}. */
@@ -263,7 +321,7 @@
 
   const api = {
     SWARAS, WESTERN, noteFreq, westernName, detectPitch, rms,
-    semitonesFromSa, swarFor, swarText, Segmenter, DETAIL, notationText, decimate,
+    semitonesFromSa, swarFor, swarText, Segmenter, DETAIL, notationText, playbackPlan, decimate,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SwarCore = api;

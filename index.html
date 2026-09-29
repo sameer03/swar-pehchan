@@ -107,11 +107,23 @@
       <div class="head-row">
         <h2>Notation</h2>
         <div class="row">
+          <button id="playBtn" class="btn primary play" aria-pressed="false"><span class="play-icon" aria-hidden="true"></span><span id="playLabel">Play</span></button>
+          <select id="playSpeed" aria-label="Playback speed">
+            <option value="0.5">0.5×</option>
+            <option value="0.75">0.75×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.25">1.25×</option>
+          </select>
+          <select id="playSound" aria-label="Playback sound">
+            <option value="harmonium" selected>Harmonium</option>
+            <option value="flute">Flute</option>
+            <option value="pure">Pure tone</option>
+          </select>
           <button id="copyBtn" class="btn">Copy</button>
           <button id="clearBtn" class="btn">Clear</button>
         </div>
       </div>
-      <div id="transcript" class="transcript"><span class="muted">Notes you sing appear here. A pause starts a new phrase.</span></div>
+      <div id="transcript" class="transcript"><span class="muted">Notes you sing appear here. A pause starts a new phrase. Press Play to hear them back, or click any note to play from there.</span></div>
     </section>
 
     <section class="panel">
@@ -139,6 +151,7 @@
 
   <script src="swar-core.js"></script>
   <script src="tanpura.js"></script>
+  <script src="player.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

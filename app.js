@@ -14,6 +14,7 @@
     nowSwar: $('nowSwar'), nowDetail: $('nowDetail'), needle: $('meterNeedle'),
     trace: $('trace'), transcript: $('transcript'),
     copyBtn: $('copyBtn'), clearBtn: $('clearBtn'),
+    playBtn: $('playBtn'), playLabel: $('playLabel'), playSpeed: $('playSpeed'), playSound: $('playSound'),
     fileIn: $('fileIn'), fileStatus: $('fileStatus'),
   };
 
@@ -94,12 +95,13 @@
       sp.title = C.swarText(e.swar);
       markAttrs(sp, e.swar);
       append(sp);
-      const it = { kind: 'pending', swar: e.swar, meend: e.meend, el: sp };
+      const it = { kind: 'pending', id: e.id, swar: e.swar, meend: e.meend, el: sp, start: e.time, end: null };
       items.push(it); byId.set(e.id, it);
       return;
     }
     const it = byId.get(e.id);
     if (!it) return;
+    if (e.type === 'end') it.end = Math.max(it.end || 0, e.time);
     if (e.type === 'main' || (e.type === 'end' && e.kind === 'main')) {
       it.kind = 'main';
       it.el.classList.remove('pending', 'kan');
@@ -112,8 +114,9 @@
   }
 
   function clearTranscript() {
+    stopPlayback();
     items.length = 0; byId.clear(); hasContent = false; segmenter.reset();
-    els.transcript.innerHTML = '<span class="muted">Notes you sing appear here. A pause starts a new phrase.</span>';
+    els.transcript.innerHTML = '<span class="muted">Notes you sing appear here. A pause starts a new phrase. Press Play to hear them back, or click any note to play from there.</span>';
   }
   els.clearBtn.addEventListener('click', clearTranscript);
 
@@ -131,6 +134,57 @@
     setTimeout(() => (btn.textContent = old), 1200);
   }
 
+  /* ---------- Play the notation back ---------- */
+  let player = null, playRaf = 0, playNotes = [], playT0 = 0;
+
+  function playableItems(fromIndex) {
+    return items.slice(fromIndex || 0).map((it) => {
+      if (it.kind !== 'pending' || it.end != null) return it;
+      // Still being sung: it lasts until now
+      const c = segmenter.cur;
+      return Object.assign({}, it, { end: c && c.id === it.id ? c.last : it.start + 0.4 });
+    });
+  }
+
+  async function startPlayback(fromIndex) {
+    const plan = C.playbackPlan(playableItems(fromIndex), { speed: +els.playSpeed.value });
+    if (!plan.length) { flash(els.playBtn, 'Nothing to play'); return; }
+    if (stream) stopMic(); // otherwise the mic would write down the playback
+    await ensureCtx();
+    if (!player) player = new window.SwarPlayer.NotationPlayer(ctx);
+    playT0 = player.play(plan, saFreq, els.playSound.value);
+    playNotes = plan.flatMap((p) => p.notes);
+    els.playBtn.setAttribute('aria-pressed', 'true');
+    els.playLabel.textContent = 'Stop';
+    cancelAnimationFrame(playRaf);
+    const tick = () => {
+      const t = ctx.currentTime - playT0;
+      let active = null;
+      for (const n of playNotes) if (t >= n.t0 && t < n.t1 + 0.02) active = n;
+      for (const n of playNotes) n.item.el.classList.toggle('playing', n === active);
+      if (ctx.currentTime >= player.endAt) { stopPlayback(); return; }
+      playRaf = requestAnimationFrame(tick);
+    };
+    playRaf = requestAnimationFrame(tick);
+  }
+
+  function stopPlayback() {
+    cancelAnimationFrame(playRaf);
+    if (player) player.stop();
+    playNotes.forEach((n) => n.item.el.classList.remove('playing'));
+    playNotes = [];
+    els.playBtn.setAttribute('aria-pressed', 'false');
+    els.playLabel.textContent = 'Play';
+  }
+
+  els.playBtn.addEventListener('click', () => (els.playBtn.getAttribute('aria-pressed') === 'true' ? stopPlayback() : startPlayback(0)));
+  els.transcript.addEventListener('click', (ev) => {
+    const el = ev.target.closest('.sw');
+    if (!el) return;
+    const i = items.findIndex((it) => it.el === el);
+    if (i >= 0) startPlayback(i);
+  });
+
   /* ---------- Microphone ---------- */
   async function ensureCtx() {
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -139,6 +193,7 @@
   }
 
   async function startMic() {
+    stopPlayback();
     try {
       await ensureCtx();
       stream = await navigator.mediaDevices.getUserMedia({
@@ -424,6 +479,7 @@
   els.fileIn.addEventListener('change', async () => {
     const file = els.fileIn.files[0];
     if (!file) return;
+    stopPlayback();
     if (stream) stopMic();
     els.fileStatus.textContent = 'Decoding…';
     try {

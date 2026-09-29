@@ -109,5 +109,29 @@ for (const first of ['Pa', 'Ma', 'Ni']) {
   assert.ok(worst < 10);
 }
 
+// 10. Playback plan: timing kept, legato joins, meend slides, long pauses shortened
+{
+  const sw = (semi) => C.swarFor(semi);
+  const items = [
+    { kind: 'main', swar: sw(0), start: 1.0, end: 1.48 },
+    { kind: 'kan', swar: sw(4), start: 1.5, end: 1.56 },
+    { kind: 'main', swar: sw(2), start: 1.58, end: 2.0 },
+    { kind: 'main', swar: sw(7), start: 2.3, end: 2.7 },
+    { kind: 'main', swar: sw(4), meend: true, start: 2.8, end: 3.2 },
+    { kind: 'gap' },
+    { kind: 'main', swar: sw(0), start: 8.0, end: 8.5 },
+  ];
+  const plan = C.playbackPlan(items);
+  assert.strictEqual(plan.length, 3, 'three phrases (break after Re, pause before last Sa)');
+  assert.strictEqual(plan[0].t0, 0, 'starts at 0');
+  assert.ok(Math.abs(plan[0].notes[0].t1 - 0.5) < 1e-9, 'Sa joined legato to the kan swar');
+  const m = plan[1].points.filter((p) => p.glide);
+  assert.ok(m.some((p) => p.semi === 4), 'meend slides into Ga');
+  assert.ok(Math.abs(plan[2].t0 - plan[1].t1 - 0.8) < 1e-9, 'long pause shortened to 0.8 s');
+  const slow = C.playbackPlan(items, { speed: 0.5 });
+  assert.ok(Math.abs(slow[0].notes[2].t0 - 2 * plan[0].notes[2].t0) < 1e-9, 'half speed doubles the timing');
+  console.log('ok   playback plan');
+}
+
 assert.strictEqual(C.westernName(C.noteFreq('A', 4)), 'A4');
 console.log('all tests passed');
