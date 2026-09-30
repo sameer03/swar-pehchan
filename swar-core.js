@@ -77,6 +77,16 @@
       tau = best;
     }
     if (tau < 1 || tau > tauMax) return null;
+    // Octave check: with a drone underneath, the true period can lose to a multiple of it
+    // (the note reads an octave or a fifth too low). If a clear dip exists at tau/2 or tau/3,
+    // the higher pitch is the real one.
+    for (const m of [2, 3]) {
+      const c = Math.round(tau / m);
+      if (c < tauMin + 1) continue;
+      let best = c;
+      for (let t = c - 2; t <= c + 2; t++) if (t > tauMin && t < tauMax && d[t] < d[best]) best = t;
+      if (d[best] < (o.octaveDip || 0.3) && d[best] < d[tau] + 0.12 && d[best] <= d[best - 1] && d[best] <= d[best + 1]) { tau = best; break; }
+    }
 
     // Parabolic interpolation for sub-sample accuracy
     const x0 = d[tau - 1], x1 = d[tau], x2 = d[tau + 1];
@@ -306,6 +316,46 @@
     return out.join(' ').replace(/ ~/g, '~').replace(/\|\n /g, '|\n').replace(/\s*\|\n$/, '').trim();
   }
 
+
+  /**
+   * Ignores the tanpura when the mic can hear it through the speakers.
+   *
+   * The app measures the tanpura's own output level (outRms) at every frame. While only the
+   * tanpura sounds, learn() works out how loud that output arrives at the mic (the ratio k)
+   * and which pitch classes it shows up as (Sa, Pa, …). Afterwards the expected leak at any
+   * moment is k × outRms, so accept() can tell whether a frame has a singer in it:
+   *  - a tanpura note (e.g. Sa) must be clearly louder than the expected leak,
+   *  - any other swar only needs to be audible (the tanpura can't play it),
+   *  - an unpitched frame at leak level is treated as silence.
+   */
+  class LeakGate {
+    constructor(opts) {
+      Object.assign(this, { margin: 1.45, otherMargin: 0.5, silenceMargin: 1.3 }, opts || {});
+      this.reset();
+    }
+    reset() { this.frames = []; this.k = 0; this.classes = new Uint8Array(12); this.ready = false; }
+    learn(micRms, outRms, semi) { if (outRms > 1e-4) this.frames.push([micRms / outRms, semi]); }
+    finish() {
+      const ratios = this.frames.map((f) => f[0]).sort((x, y) => x - y);
+      this.k = ratios.length ? ratios[ratios.length >> 1] : 0;
+      const count = new Array(12).fill(0);
+      let voiced = 0;
+      for (const [, semi] of this.frames) if (semi != null) { count[((Math.round(semi) % 12) + 12) % 12]++; voiced++; }
+      for (let c = 0; c < 12; c++) this.classes[c] = count[c] >= Math.max(3, 0.05 * voiced) ? 1 : 0;
+      this.frames = [];
+      this.ready = true;
+    }
+    accept(micRms, semi, outRms) {
+      if (!this.ready) return true;
+      const leak = this.k * outRms;
+      if (semi == null) return micRms > leak * this.silenceMargin;
+      const c = ((Math.round(semi) % 12) + 12) % 12;
+      return micRms > leak * (this.classes[c] ? this.margin : this.otherMargin);
+    }
+    /** Pitch classes the tanpura showed up as. */
+    heard() { return [...this.classes].map((v, c) => (v ? c : -1)).filter((c) => c >= 0); }
+  }
+
   /** Average-and-decimate a signal (cheap low-pass + downsample). */
   function decimate(data, factor) {
     if (factor <= 1) return data;
@@ -321,7 +371,7 @@
 
   const api = {
     SWARAS, WESTERN, noteFreq, westernName, detectPitch, rms,
-    semitonesFromSa, swarFor, swarText, Segmenter, DETAIL, notationText, playbackPlan, decimate,
+    semitonesFromSa, swarFor, swarText, Segmenter, DETAIL, notationText, playbackPlan, LeakGate, decimate,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SwarCore = api;

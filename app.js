@@ -23,6 +23,11 @@
   let saFreq = 0;
   let calibrating = null; // { until, samples: [] }
   let tanpura = null;
+  let outAnalyser = null, outBuf = null;
+  const outLevels = [];            // tanpura output level over the last few frames
+  const leakGate = new C.LeakGate();
+  let leakCheck = null;            // { until } while learning how the tanpura sounds at the mic
+  let micEchoCancel = false;
   const history = []; // { t, semi } for the trace
   const TRACE_SECONDS = 8;
 
@@ -196,8 +201,11 @@
     stopPlayback();
     try {
       await ensureCtx();
+      // With the tanpura playing, let the browser cancel its own output from the mic.
+      // Without it, keep the voice untouched.
+      micEchoCancel = !!(tanpura && tanpura.playing);
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        audio: { echoCancellation: micEchoCancel, noiseSuppression: false, autoGainControl: false },
       });
     } catch (err) {
       els.nowDetail.textContent = 'Microphone blocked. Allow mic access and open the page over https or localhost.';
@@ -212,7 +220,28 @@
     els.micBtn.setAttribute('aria-pressed', 'true');
     els.micLabel.textContent = 'Stop';
     els.nowDetail.textContent = 'Listening…';
+    if (tanpura && tanpura.playing) startLeakCheck();
     loop();
+  }
+
+  async function restartMic() {
+    cancelAnimationFrame(rafId);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+    await startMic();
+  }
+
+  function startLeakCheck() {
+    leakGate.reset();
+    leakCheck = { until: performance.now() + 3000 };
+  }
+
+  function tanpuraLevel() {
+    if (!outAnalyser || !tanpura) return 0;
+    outAnalyser.getFloatTimeDomainData(outBuf);
+    outLevels.push(C.rms(outBuf));
+    if (outLevels.length > 10) outLevels.shift();   // ~150 ms: covers the speaker-to-mic delay
+    return Math.max(...outLevels);
   }
 
   function stopMic() {
@@ -230,10 +259,26 @@
     rafId = requestAnimationFrame(loop);
     analyser.getFloatTimeDomainData(buf);
     const t = ctx.currentTime;
-    let freq = null, loud = C.rms(buf) > SILENCE_RMS;
+    const micRms = C.rms(buf);
+    let freq = null, loud = micRms > SILENCE_RMS;
     if (loud) {
       const p = C.detectPitch(buf, ctx.sampleRate);
       if (p) freq = p.freq;
+    }
+
+    // Tanpura heard through the speakers: learn it for 3 s, then filter it out
+    const outRms = tanpuraLevel();
+    if (leakCheck) {
+      leakGate.learn(micRms, outRms, freq ? C.semitonesFromSa(freq, saFreq) : null);
+      const left = Math.max(0, leakCheck.until - performance.now());
+      els.nowDetail.textContent = `Tuning out the tanpura… please stay quiet ${(left / 1000).toFixed(1)}s`;
+      showNowSwar(null);
+      if (left > 0) return;
+      leakGate.finish();
+      leakCheck = null;
+      els.nowDetail.textContent = 'Ready. Sing!';
+    } else if (leakGate.ready && !leakGate.accept(micRms, freq ? C.semitonesFromSa(freq, saFreq) : null, outRms)) {
+      freq = null; loud = false;   // just the tanpura
     }
 
     if (calibrating) {
@@ -250,6 +295,12 @@
     while (history.length && t - history[0].t > TRACE_SECONDS) history.shift();
     showNow(freq, semi);
     drawTrace(t);
+  }
+
+  function showNowSwar() {
+    els.nowSwar.textContent = '—';
+    markAttrs(els.nowSwar, { octave: 0 });
+    els.needle.style.left = '50%';
   }
 
   function showNow(freq, semi) {
@@ -299,13 +350,7 @@
   /* ---------- Tanpura ---------- */
   async function toggleTanpura() {
     await ensureCtx();
-    if (!tanpura) {
-      tanpura = new window.SwarTanpura.Tanpura(ctx);
-      tanpura.setFirst(els.tFirst.value);
-      tanpura.setSpeed(+els.tSpeed.value);
-      tanpura.setVolume(+els.tVol.value);
-      tanpura.setSa(saFreq);
-    }
+    getTanpura();
     if (!tanpura.playing && els.tSound.value === 'recording' && !(await ensureRecording())) {
       return; // the file picker is open; loading a file starts the tanpura
     }
@@ -314,6 +359,28 @@
     else tanpura.start();
     els.tanpuraBtn.setAttribute('aria-pressed', String(tanpura.playing));
     els.tanpuraPanel.classList.toggle('on', tanpura.playing);
+    onTanpuraChanged();
+  }
+
+  function getTanpura() {
+    if (tanpura) return tanpura;
+    tanpura = new window.SwarTanpura.Tanpura(ctx);
+    tanpura.setFirst(els.tFirst.value); tanpura.setSpeed(+els.tSpeed.value);
+    tanpura.setVolume(+els.tVol.value); tanpura.setSa(saFreq);
+    // Measure what the tanpura is playing, so the mic can tell it apart from the singer
+    outAnalyser = ctx.createAnalyser();
+    outAnalyser.fftSize = 2048;
+    outBuf = new Float32Array(outAnalyser.fftSize);
+    tanpura.out.connect(outAnalyser);
+    return tanpura;
+  }
+
+  /** Tanpura switched on/off: switch echo cancellation to match, and re-learn the leak. */
+  async function onTanpuraChanged() {
+    if (!stream) return;
+    const on = !!(tanpura && tanpura.playing);
+    if (on !== micEchoCancel) await restartMic();
+    else if (on) startLeakCheck();
   }
   els.tanpuraBtn.addEventListener('click', toggleTanpura);
   els.tFirst.addEventListener('change', () => tanpura && tanpura.setFirst(els.tFirst.value));
@@ -364,11 +431,7 @@
   /** Decode + analyse a recording (bytes: ArrayBuffer). */
   async function useRecording(name, bytes) {
     await ensureCtx();
-    if (!tanpura) {
-      tanpura = new window.SwarTanpura.Tanpura(ctx);
-      tanpura.setFirst(els.tFirst.value); tanpura.setSpeed(+els.tSpeed.value);
-      tanpura.setVolume(+els.tVol.value); tanpura.setSa(saFreq);
-    }
+    getTanpura();
     els.tStatus.textContent = 'Reading the recording…';
     const audio = await ctx.decodeAudioData(bytes.slice(0));
     const mono = new Float32Array(audio.length);

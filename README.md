@@ -17,7 +17,7 @@ It runs entirely in the browser. There's no server and no install, and your audi
   - **Built-in:** a synthesised four-string tanpura (first string, Sa, Sa, kharaj Sa) with jawari. You can set the first string to Pa, Ma or Ni and adjust speed and volume.
   - **My recording:** load a recording of a real tanpura in any key. The app detects its Sa, retunes it to yours (by at most ±6 semitones) and loops it seamlessly. This gives the sound of a studio-sampled tanpura app. The file stays in your browser and is remembered, and it's never uploaded or added to the repo. Only use recordings you have the rights to.
 
-  Use headphones while singing so the mic doesn't pick up the tanpura.
+  **Singing with the tanpura through speakers:** when you start listening with the tanpura on, stay quiet for 3 seconds. The app learns how the tanpura sounds at your mic and then ignores it, writing a Sa or Pa only when it's clearly your voice. It also switches on the browser's echo cancellation while the tanpura plays. Headphones still give the cleanest result.
 - **Hear it back:** press **Play** to hear the notation as it was sung, with the same timing, kan swaras and meend slides, in your Sa. Each note lights up as it plays. Click any note to play from there. Choose the speed (0.5× to 1.25×) and the sound (harmonium, flute or pure tone).
 - **Recording analysis:** upload an mp3, wav or m4a file and get its notation.
 - **Copy as text:** e.g. `Sa Re Ga(k) Ma(t) Pa Dha(k) Ni Sa' .Ni`

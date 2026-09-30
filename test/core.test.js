@@ -133,5 +133,41 @@ for (const first of ['Pa', 'Ma', 'Ni']) {
   console.log('ok   playback plan');
 }
 
+// 11. Tanpura heard through the speakers is not written down, and the voice still is
+{
+  const sr = 44100, secs = 14, sa = SA;
+  const strings = T.stringFreqs(sa, 'Pa').map((f, i) => T.renderString(f, sr, { seconds: 6, seed: i + 5 }));
+  const out = new Float32Array(secs * sr);
+  for (let k = 0, t = 0; t < secs; k++, t += 1.1) { const b = strings[k % 4], s = Math.floor(t * sr); for (let i = 0; i < b.length && s + i < out.length; i++) out[s + i] += 0.1 * b[i]; }
+  const voice = sing([[null, null, 3.5], [0, 0, 0.5, { vibrato: 0.2 }], [4, 4, 0.5, { vibrato: 0.2 }], [7, 7, 0.6, { vibrato: 0.2 }], [null, null, 0.7], [5, 5, 0.5, { vibrato: 0.2 }], [2, 2, 0.5, { vibrato: 0.2 }], [0, 0, 0.7, { vibrato: 0.2 }], null]);
+  const D = Math.floor(0.05 * sr), mic = new Float32Array(secs * sr);
+  for (let i = 0; i < mic.length; i++) mic[i] = (i < voice.length ? 0.25 * voice[i] : 0) + 0.7 * (i >= D ? out[i - D] : 0);
+  const run = (useGate) => {
+    const FRAME = 2048, HOP = 735, items = [], byId = {}, gate = new C.LeakGate();
+    const seg = new C.Segmenter((e) => {
+      if (e.type === 'gap') items.push({ kind: 'gap' });
+      else if (e.type === 'note') { byId[e.id] = { kind: 'pending', swar: e.swar, meend: e.meend }; items.push(byId[e.id]); }
+      else if (e.type === 'main') byId[e.id].kind = 'main'; else if (e.type === 'end') byId[e.id].kind = e.kind;
+    });
+    let t = 0;
+    for (let i = 0; i + FRAME < mic.length; i += HOP) {
+      const fr = mic.subarray(i, i + FRAME), rms = C.rms(fr); t = i / sr;
+      let o = 0; for (let j = Math.max(0, i - 6615); j <= i; j += HOP) o = Math.max(o, C.rms(out.subarray(j, j + FRAME)));
+      const p = rms > 0.01 ? C.detectPitch(fr, sr) : null, semi = p ? C.semitonesFromSa(p.freq, sa) : null;
+      if (t < 3) { if (useGate) gate.learn(rms, o, semi); continue; }
+      if (useGate && !gate.ready) gate.finish();
+      let x = p ? semi : rms > 0.01 ? undefined : null;
+      if (useGate && !gate.accept(rms, semi, o)) x = null;
+      seg.push(t, x);
+    }
+    seg.flush(t);
+    return C.notationText(items).replace(/\n/g, ' ');
+  };
+  const without = run(false), filtered = run(true);
+  assert.notStrictEqual(without, filtered, 'the leak must actually cause stray notes without the filter');
+  console.log('     (without filter: ' + without + ')');
+  check('tanpura leak filtered out', filtered, 'Sa Ga Pa | Ma Re Sa');
+}
+
 assert.strictEqual(C.westernName(C.noteFreq('A', 4)), 'A4');
 console.log('all tests passed');
